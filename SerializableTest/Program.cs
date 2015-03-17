@@ -162,22 +162,26 @@ namespace SerializeExercise
 
         public static void Serialize<T>(T o, Stream stream)
         {
-            SerializeImp(o, stream, o);
+
+            SerializeImp(o, stream, new Dictionary<int, int>());
         }
 
-        static void SerializeImp(object o, Stream stream, object root)
+        static void SerializeImp(object o, Stream stream, Dictionary<int,int> refs)
         {
             var writer = new BinaryWriter(stream, Encoding.Unicode);
             var type = o.GetType();
             writer.Write(type.FullName);
+            writer.Write(o.GetHashCode());
+            refs.Add(o.GetHashCode(), o.GetHashCode());
             var properties = type.GetProperties();
             writer.Write(properties.Length);
             foreach (var propertyInfo in properties)
             {
                 writer.Write(propertyInfo.Name);
                 var propType = propertyInfo.PropertyType.FullName;
-                var propValue = propertyInfo.GetValue(o);
-                if (propValue == root)
+                var propValue = propertyInfo.GetValue(o); 
+                writer.Write(propValue.GetHashCode());
+                if (refs.ContainsKey(propValue.GetHashCode()))
                 {
                     writer.Write(_Root);
                     continue;
@@ -201,7 +205,7 @@ namespace SerializeExercise
                 else
                 {
                     writer.Write(_Complex);
-                    SerializeImp(propValue, stream, o);
+                    SerializeImp(propValue, stream, refs);
                 }
             }
         }
@@ -209,24 +213,27 @@ namespace SerializeExercise
         
         public static T Deserialize<T>(Stream stream)
         {
-            return (T)DeserializeImpl(stream, null);
+            return (T)DeserializeImpl(stream, new Dictionary<int, object>());
         }
 
-        static object DeserializeImpl(Stream stream, object root)
+        static object DeserializeImpl(Stream stream, Dictionary<int, object> objectRefs)
         {
             var reader = new BinaryReader(stream, Encoding.Unicode);
             var rootTypeName = reader.ReadString();
+            var typeHash = reader.ReadInt32();
             var rootType = Type.GetType(rootTypeName);
             var rootObj = Activator.CreateInstance(rootType);
+            objectRefs.Add(typeHash, rootObj);
             var propCount = reader.ReadInt32();
             for (int i = 0; i < propCount; ++i)
             {
                 var propName = reader.ReadString();
+                var propHash = reader.ReadInt32();
                 var proptype = reader.ReadString();
                 switch (proptype)
                 {
                     case _Complex:
-                        rootType.GetProperty(propName).SetValue(rootObj, DeserializeImpl(stream, rootObj));
+                        rootType.GetProperty(propName).SetValue(rootObj, DeserializeImpl(stream, objectRefs));
                         break;
                     case _String:
                         rootType.GetProperty(propName).SetValue(rootObj, reader.ReadString());
@@ -241,7 +248,7 @@ namespace SerializeExercise
                         }
                         break;
                     case _Root:
-                        rootType.GetProperty(propName).SetValue(rootObj, root);
+                        rootType.GetProperty(propName).SetValue(rootObj, objectRefs[propHash]);
                         break;
                 }
 
